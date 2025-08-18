@@ -1,16 +1,18 @@
-name: SAST - CodeQL with DefectDojo Upload
+name: CodeQL SAST with DefectDojo Upload
 
 on:
   push:
-    branches: [ main ]
+    branches: [ "main" ]
   pull_request:
-    branches: [ main ]
+    branches: [ "main" ]
   schedule:
-    - cron: '0 0 * * 0'
+    - cron: '0 2 * * 1'
 
 jobs:
   codeql-sast:
+    name: CodeQL Analysis and DefectDojo Upload
     runs-on: ubuntu-latest
+
     permissions:
       security-events: write
       actions: read
@@ -19,7 +21,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: [ 'javascript', 'python' ]
+        language: [ 'javascript', 'python' ]  # Add more if needed
 
     steps:
       - name: Checkout repository
@@ -36,22 +38,23 @@ jobs:
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
         with:
-          category: "/language:${{ matrix.language }}"
-          output: results  # <-- force SARIF into ./results
+          output: results
 
-      - name: Debug – List CodeQL results
+      - name: List results
         run: ls -R results || echo "No results found"
 
       - name: Upload SARIFs to DefectDojo
         run: |
           if [ -d "results" ]; then
             for file in results/*.sarif; do
-              echo "Uploading $file to DefectDojo..."
+              lang=$(basename $file .sarif)
+              echo "Uploading $file to DefectDojo with title ${lang}..."
               curl -sS -X POST "${DOJO_URL}/api/v2/import-scan/" \
                 -H "Authorization: Token ${DOJO_API_KEY}" \
-                -F "scan_type=SARIF Report" \
+                -F "scan_type=SARIF" \
                 -F "file=@${file}" \
                 -F "engagement=${DOJO_ENGAGEMENT_ID}" \
+                -F "test_title=CodeQL-${lang}" \
                 -F "active=true" \
                 -F "verified=false" || echo "Failed to upload $file"
             done
