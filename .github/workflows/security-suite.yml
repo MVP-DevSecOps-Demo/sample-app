@@ -1,0 +1,119 @@
+name: Security Suite
+
+on:
+  workflow_dispatch:   # allows manual run from GitHub Actions UI
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+  dependabot: read
+
+jobs:
+  codeql:
+    name: CodeQL Analysis
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: python # adjust based on your repo
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+
+  trivy:
+    name: Trivy Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Run Trivy FS Scan
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh
+          ./trivy fs . --format sarif --output trivy.sarif
+          ./trivy fs . --format json --output trivy.json
+
+      - name: Upload Trivy results (SARIF) to GitHub
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy.sarif
+
+      - name: Upload Trivy results (JSON) to DefectDojo
+        run: |
+          curl -X POST "${{ secrets.DOJO_URL }}/api/v2/import-scan/" \
+            -H "Authorization: Token ${{ secrets.DOJO_API_KEY }}" \
+            -F "scan_type=Trivy Scan" \
+            -F "file=@trivy.json" \
+            -F "engagement=${{ secrets.DOJO_ENGAGEMENT_ID }}" \
+            -F "active=true" \
+            -F "verified=false"
+
+  dependency-review:
+    name: Dependency Review
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v4
+
+      - name: Convert Dependency Review results to JSON (placeholder)
+        run: |
+          echo '{"findings": []}' > dep-review.json
+
+      - name: Upload Dependency Review results to DefectDojo
+        run: |
+          curl -X POST "${{ secrets.DOJO_URL }}/api/v2/import-scan/" \
+            -H "Authorization: Token ${{ secrets.DOJO_API_KEY }}" \
+            -F "scan_type=Dependency Check" \
+            -F "file=@dep-review.json" \
+            -F "engagement=${{ secrets.DOJO_ENGAGEMENT_ID }}" \
+            -F "active=true" \
+            -F "verified=false"
+
+  github-alerts:
+    name: Forward GitHub Alerts (Secrets & Dependabot)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch Secret Scanning Alerts
+        run: |
+          curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/secret-scanning/alerts" \
+            > secrets.json
+
+      - name: Upload Secrets Scan results to DefectDojo
+        run: |
+          curl -X POST "${{ secrets.DOJO_URL }}/api/v2/import-scan/" \
+            -H "Authorization: Token ${{ secrets.DOJO_API_KEY }}" \
+            -F "scan_type=Generic Findings Import" \
+            -F "file=@secrets.json" \
+            -F "engagement=${{ secrets.DOJO_ENGAGEMENT_ID }}" \
+            -F "active=true" \
+            -F "verified=false"
+
+      - name: Fetch Dependabot Alerts
+        run: |
+          curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/dependabot/alerts" \
+            > dependabot.json
+
+      - name: Upload Dependabot Alerts to DefectDojo
+        run: |
+          curl -X POST "${{ secrets.DOJO_URL }}/api/v2/import-scan/" \
+            -H "Authorization: Token ${{ secrets.DOJO_API_KEY }}" \
+            -F "scan_type=Dependency Check" \
+            -F "file=@dependabot.json" \
+            -F "engagement=${{ secrets.DOJO_ENGAGEMENT_ID }}" \
+            -F "active=true" \
+            -F "verified=false"
