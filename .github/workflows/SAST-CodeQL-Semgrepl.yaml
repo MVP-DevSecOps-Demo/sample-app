@@ -1,80 +1,99 @@
-name: SAST - Semgrep & CodeQL
+name: SAST-CodeQL-Semgrep
 
 on:
-  workflow_dispatch:   # manual trigger
+  workflow_dispatch:   # manual run
   push:
-    branches: [ "main" ]
+    branches: [ main ]
   pull_request:
 
-permissions:
-  contents: read
-  security-events: write
-
 jobs:
-  semgrep:
+  security-scans:
     runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+      actions: read
+
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
-      - name: Install and Run Semgrep
-        run: |
-          pip install semgrep
-          # Output both SARIF (for GitHub) and JSON (for DefectDojo)
-          semgrep --config p/ci --sarif --output semgrep.sarif
-          semgrep --config p/ci --json --output semgrep.json
+      ########################
+      # CODEQL INIT
+      ########################
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: python,javascript
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Run CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          output: codeql-results.sarif
+
+      ########################
+      # UPLOAD CODEQL RESULTS
+      ########################
+      - name: Upload CodeQL SARIF to GitHub (Python)
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: codeql-results.sarif/python.sarif
+          category: codeql-python
+
+      - name: Upload CodeQL SARIF to GitHub (JavaScript)
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: codeql-results.sarif/javascript.sarif
+          category: codeql-javascript
+
+      ########################
+      # SEMGREP SCAN
+      ########################
+      - name: Run Semgrep
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: "p/default"
+          output: semgrep.sarif
+          sarif: true
 
       - name: Upload Semgrep SARIF to GitHub
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: semgrep.sarif
+          category: semgrep
+
+      ########################
+      # PUSH TO DEFECTDOJO
+      ########################
+      - name: Upload CodeQL results (Python) to DefectDojo
+        run: |
+          curl -X POST "${{ secrets.DOJO_URL }}/api/v2/import-scan/" \
+            -H "Authorization: Token ${{ secrets.DOJO_API_KEY }}" \
+            -F "scan_type=CodeQL" \
+            -F "file=@codeql-results.sarif/python.sarif" \
+            -F "engagement=${{ secrets.DOJO_ENGAGEMENT_ID }}" \
+            -F "active=true" \
+            -F "verified=false"
+
+      - name: Upload CodeQL results (JavaScript) to DefectDojo
+        run: |
+          curl -X POST "${{ secrets.DOJO_URL }}/api/v2/import-scan/" \
+            -H "Authorization: Token ${{ secrets.DOJO_API_KEY }}" \
+            -F "scan_type=CodeQL" \
+            -F "file=@codeql-results.sarif/javascript.sarif" \
+            -F "engagement=${{ secrets.DOJO_ENGAGEMENT_ID }}" \
+            -F "active=true" \
+            -F "verified=false"
 
       - name: Upload Semgrep results to DefectDojo
         run: |
           curl -X POST "${{ secrets.DOJO_URL }}/api/v2/import-scan/" \
             -H "Authorization: Token ${{ secrets.DOJO_API_KEY }}" \
             -F "scan_type=Semgrep JSON Report" \
-            -F "file=@semgrep.json" \
-            -F "engagement=${{ secrets.DOJO_ENGAGEMENT_ID }}" \
-            -F "active=true" \
-            -F "verified=false"
-
-  codeql:
-    runs-on: ubuntu-latest
-    permissions:
-      actions: read
-      contents: read
-      security-events: write
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
-
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@v2
-        with:
-          languages: python,javascript
-
-      - name: Build project
-        run: |
-          echo "Add build steps here if needed"
-
-      - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v2
-        with:
-          output: codeql-results.sarif
-
-      - name: Upload CodeQL SARIF to GitHub
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: codeql-results.sarif
-
-      - name: Upload CodeQL results to DefectDojo
-        run: |
-          curl -X POST "${{ secrets.DOJO_URL }}/api/v2/import-scan/" \
-            -H "Authorization: Token ${{ secrets.DOJO_API_KEY }}" \
-            -F "scan_type=CodeQL" \
-            -F "file=@codeql-results.sarif" \
+            -F "file=@semgrep.sarif" \
             -F "engagement=${{ secrets.DOJO_ENGAGEMENT_ID }}" \
             -F "active=true" \
             -F "verified=false"
