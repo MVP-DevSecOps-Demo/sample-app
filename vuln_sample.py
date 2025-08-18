@@ -1,14 +1,22 @@
 # vuln_sample.py
+
 import os
+import subprocess
+import hashlib
+import pickle
 
-# Hardcoded secret (Semgrep should flag this)
-API_KEY = "12345-SECRET-HARDCODED"
+def run_cmd(user_input):
+    # 🚨 Vulnerable: dangerous system call
+    os.system("echo " + user_input)
 
-# Command injection vulnerability
-user_input = input("Enter a filename: ")
-os.system("cat " + user_input)
+def run_popen(user_input):
+    # 🚨 Vulnerable: subprocess with shell=True
+    subprocess.Popen(user_input, shell=True)
 
-# SQL injection style (unsafe string formatting)
-def get_user(cursor, username):
-    query = "SELECT * FROM users WHERE username = '%s'" % username
-    cursor.execute(query)
+def weak_hash(pwd):
+    # 🚨 Vulnerable: MD5 is insecure
+    return hashlib.md5(pwd.encode()).hexdigest()
+
+def insecure_pickle(data):
+    # 🚨 Vulnerable: unsafe pickle.load
+    return pickle.loads(data)
