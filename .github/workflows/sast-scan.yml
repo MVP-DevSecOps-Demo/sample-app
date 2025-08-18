@@ -30,10 +30,10 @@ jobs:
 
       - name: Upload scan results (JSON) to DefectDojo
         run: |
-          curl -X POST "https://712393bc3882.ngrok-free.app/api/v2/import-scan/" \
-            -H "Authorization: Token ${{ secrets.DEFECTDOJO_API_KEY }}" \
+          curl -X POST "${{ secrets.DOJO_URL }}/api/v2/import-scan/" \
+            -H "Authorization: Token ${{ secrets.DOJO_API_KEY }}" \
             -F "scan_type=Semgrep JSON Report" \
             -F "file=@semgrep.json" \
-            -F "engagement=${{ secrets.DEFECTDOJO_ENGAGEMENT_ID }}" \
+            -F "engagement=${{ secrets.DOJO_ENGAGEMENT_ID }}" \
             -F "active=true" \
             -F "verified=false"
