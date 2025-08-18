@@ -19,9 +19,21 @@ jobs:
       - name: Install and Run Semgrep
         run: |
           pip install semgrep
+          # Output both SARIF (for GitHub) and JSON (for DefectDojo)
           semgrep --config p/default --sarif --output semgrep.sarif
+          semgrep --config p/default --json --output semgrep.json
 
-      - name: Upload scan results (SARIF)
+      - name: Upload scan results (SARIF) to GitHub
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: semgrep.sarif
+
+      - name: Upload scan results (JSON) to DefectDojo
+        run: |
+          curl -X POST "http://localhost:8080/api/v2/import-scan/" \
+            -H "Authorization: Token ${{ secrets.DEFECTDOJO_API_KEY }}" \
+            -F "scan_type=Semgrep JSON Report" \
+            -F "file=@semgrep.json" \
+            -F "engagement=${{ secrets.DEFECTDOJO_ENGAGEMENT_ID }}" \
+            -F "active=true" \
+            -F "verified=false"
