@@ -6,7 +6,7 @@ on:
   pull_request:
     branches: [ main ]
   schedule:
-    - cron: '0 0 * * 0' # Weekly run
+    - cron: '0 0 * * 0'
 
 jobs:
   codeql-sast:
@@ -19,7 +19,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: [ 'javascript', 'python' ] # Add more if needed
+        language: [ 'javascript', 'python' ]
 
     steps:
       - name: Checkout repository
@@ -37,16 +37,15 @@ jobs:
         uses: github/codeql-action/analyze@v3
         with:
           category: "/language:${{ matrix.language }}"
+          output: results  # <-- force SARIF into ./results
 
-      # Debug step to check SARIF outputs
       - name: Debug – List CodeQL results
-        run: ls -R codeql-results || echo "No codeql-results found"
+        run: ls -R results || echo "No results found"
 
-      # Upload all SARIF files to DefectDojo
       - name: Upload SARIFs to DefectDojo
         run: |
-          if [ -d "codeql-results" ]; then
-            for file in codeql-results/*.sarif; do
+          if [ -d "results" ]; then
+            for file in results/*.sarif; do
               echo "Uploading $file to DefectDojo..."
               curl -sS -X POST "${DOJO_URL}/api/v2/import-scan/" \
                 -H "Authorization: Token ${DOJO_API_KEY}" \
