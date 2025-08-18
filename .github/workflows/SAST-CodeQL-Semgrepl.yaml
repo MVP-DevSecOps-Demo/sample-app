@@ -1,10 +1,12 @@
-name: SAST-CodeQL-Semgrep
+name: Security Suite
 
 on:
-  workflow_dispatch:   # manual run
   push:
-    branches: [ main ]
+    branches: [ "main" ]
   pull_request:
+    branches: [ "main" ]
+  schedule:
+    - cron: '0 0 * * 0'   # weekly scan
 
 jobs:
   security-scans:
@@ -12,88 +14,55 @@ jobs:
     permissions:
       security-events: write
       contents: read
-      actions: read
+
+    env:
+      DEFECTDOJO_URL: ${{ secrets.DEFECTDOJO_URL }}
+      DEFECTDOJO_API_KEY: ${{ secrets.DEFECTDOJO_API_KEY }}
+      DEFECTDOJO_ENGAGEMENT_ID: ${{ secrets.DEFECTDOJO_ENGAGEMENT_ID }}
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
 
-      ########################
-      # CODEQL INIT
-      ########################
+      ############################################
+      # CodeQL Scan
+      ############################################
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
-          languages: python,javascript
+          languages: javascript, python
 
       - name: Autobuild
         uses: github/codeql-action/autobuild@v3
 
-      - name: Run CodeQL Analysis
+      - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
         with:
-          output: codeql-results.sarif
+          output: codeql-results
 
-      ########################
-      # UPLOAD CODEQL RESULTS
-      ########################
-      - name: Upload CodeQL SARIF to GitHub (Python)
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: codeql-results.sarif/python.sarif
-          category: codeql-python
-
-      - name: Upload CodeQL SARIF to GitHub (JavaScript)
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: codeql-results.sarif/javascript.sarif
-          category: codeql-javascript
-
-      ########################
-      # SEMGREP SCAN
-      ########################
-      - name: Run Semgrep
-        uses: returntocorp/semgrep-action@v1
-        with:
-          config: "p/default"
-          output: semgrep.sarif
-          sarif: true
-
-      - name: Upload Semgrep SARIF to GitHub
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: semgrep.sarif
-          category: semgrep
-
-      ########################
-      # PUSH TO DEFECTDOJO
-      ########################
-      - name: Upload CodeQL results (Python) to DefectDojo
+      - name: Upload CodeQL results to DefectDojo
         run: |
-          curl -X POST "${{ secrets.DOJO_URL }}/api/v2/import-scan/" \
-            -H "Authorization: Token ${{ secrets.DOJO_API_KEY }}" \
-            -F "scan_type=CodeQL" \
-            -F "file=@codeql-results.sarif/python.sarif" \
-            -F "engagement=${{ secrets.DOJO_ENGAGEMENT_ID }}" \
-            -F "active=true" \
-            -F "verified=false"
+          curl -X POST "$DEFECTDOJO_URL/api/v2/import-scan/" \
+            -H "Authorization: Token $DEFECTDOJO_API_KEY" \
+            -F "scan_type=CodeQL Scan" \
+            -F "file=@codeql-results/codeql.sarif.json" \
+            -F "engagement=$DEFECTDOJO_ENGAGEMENT_ID"
 
-      - name: Upload CodeQL results (JavaScript) to DefectDojo
+      ############################################
+      # Semgrep Scan
+      ############################################
+      - name: Install Semgrep
+        run: pip install semgrep
+
+      - name: Run Semgrep (JSON + SARIF)
         run: |
-          curl -X POST "${{ secrets.DOJO_URL }}/api/v2/import-scan/" \
-            -H "Authorization: Token ${{ secrets.DOJO_API_KEY }}" \
-            -F "scan_type=CodeQL" \
-            -F "file=@codeql-results.sarif/javascript.sarif" \
-            -F "engagement=${{ secrets.DOJO_ENGAGEMENT_ID }}" \
-            -F "active=true" \
-            -F "verified=false"
+          semgrep --config=p/default --json > semgrep.json
+          semgrep --config=p/default --sarif > semgrep.sarif
 
       - name: Upload Semgrep results to DefectDojo
         run: |
-          curl -X POST "${{ secrets.DOJO_URL }}/api/v2/import-scan/" \
-            -H "Authorization: Token ${{ secrets.DOJO_API_KEY }}" \
-            -F "scan_type=Semgrep JSON Report" \
+          curl -X POST "$DEFECTDOJO_URL/api/v2/import-scan/" \
+            -H "Authorization: Token $DEFECTDOJO_API_KEY" \
+            -F "scan_type=Semgrep Scan" \
             -F "file=@semgrep.sarif" \
-            -F "engagement=${{ secrets.DOJO_ENGAGEMENT_ID }}" \
-            -F "active=true" \
-            -F "verified=false"
+            -F "engagement=$DEFECTDOJO_ENGAGEMENT_ID"
