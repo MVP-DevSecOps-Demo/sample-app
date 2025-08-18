@@ -15,20 +15,11 @@ jobs:
       - name: Run Semgrep scan
         uses: returntocorp/semgrep-action@v1
         with:
-          config: "p/default"  # OWASP + security rules
+          config: "p/default"
           output: semgrep.sarif
+          output_format: sarif
 
-      - name: Upload scan results (SARIF to GitHub Security)
-        uses: github/codeql-action/upload-sarif@v2
+      - name: Upload scan results (SARIF)
+        uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: semgrep.sarif
-
-      - name: Upload scan results to DefectDojo
-        run: |
-          curl -X POST "${{ secrets.DOJO_URL }}import-scan/" \
-            -H "Authorization: Token ${{ secrets.DOJO_API_KEY }}" \
-            -H "Content-Type: multipart/form-data" \
-            -F "file=@semgrep.sarif" \
-            -F "scan_type=SARIF" \
-            -F "engagement=${{ secrets.DOJO_ENGAGEMENT_ID }}" \
-            -F "auto_create_context=true"
