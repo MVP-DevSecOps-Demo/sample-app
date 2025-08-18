@@ -19,9 +19,12 @@ jobs:
       - name: Install and Run Semgrep
         run: |
           pip install semgrep
-          # Run semgrep with stronger ruleset (security-focused) and explicitly scan vuln_sample.py + all code
-          semgrep --config p/ci --sarif --output semgrep.sarif vuln_sample.py .
-          semgrep --config p/ci --json --output semgrep.json vuln_sample.py .
+          echo "=== Running Semgrep on vuln_sample.py ==="
+          ls -la vuln_sample.py
+          semgrep --config p/ci --sarif --output semgrep.sarif vuln_sample.py
+          semgrep --config p/ci --json --output semgrep.json vuln_sample.py
+          echo "=== Semgrep findings (raw JSON) ==="
+          cat semgrep.json
 
       - name: Upload scan results (SARIF) to GitHub
         uses: github/codeql-action/upload-sarif@v3
