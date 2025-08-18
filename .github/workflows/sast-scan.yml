@@ -20,8 +20,8 @@ jobs:
         run: |
           pip install semgrep
           # Output both SARIF (for GitHub) and JSON (for DefectDojo)
-          semgrep --config p/default --sarif --output semgrep.sarif
-          semgrep --config p/default --json --output semgrep.json
+          semgrep --config p/ci --sarif --output semgrep.sarif
+          semgrep --config p/ci --json --output semgrep.json
 
       - name: Upload scan results (SARIF) to GitHub
         uses: github/codeql-action/upload-sarif@v3
