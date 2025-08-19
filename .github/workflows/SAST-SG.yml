@@ -19,12 +19,19 @@ jobs:
       - name: Install Semgrep
         run: pip install semgrep
 
-      - name: Run Semgrep scan
+      - name: Run Semgrep scan (SARIF)
         run: |
-          echo "Scanning vuln_sample.py..."
+          echo "Scanning vuln_sample.py for SARIF..."
           semgrep --config "p/owasp-top-ten,p/python,p/secrets" \
             --verbose \
             --sarif --output semgrep.sarif \
+            ./vuln_sample.py
+
+      - name: Run Semgrep scan (JSON)
+        run: |
+          echo "Scanning vuln_sample.py for JSON..."
+          semgrep --config "p/owasp-top-ten,p/python,p/secrets" \
+            --verbose \
             --json --output semgrep.json \
             ./vuln_sample.py
 
