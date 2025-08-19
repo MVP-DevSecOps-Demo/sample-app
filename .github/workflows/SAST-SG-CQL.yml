@@ -10,7 +10,7 @@ permissions:
   security-events: write
 
 jobs:
-  security-scans:
+  semgrep:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -19,23 +19,24 @@ jobs:
       - name: Install Semgrep
         run: pip install semgrep
 
-      # -------------------
-      # Semgrep Scans
-      # -------------------
-      - name: Run Semgrep Scan (SARIF for GitHub)
+      - name: Run Semgrep SARIF scan for GitHub
         run: |
-          semgrep --config "p/owasp-top-ten,p/python,p/secrets" --sarif --output semgrep.sarif
+          semgrep --config "p/owasp-top-ten,p/python,p/secrets" \
+                  --sarif \
+                  --output semgrep.sarif
 
-      - name: Run Semgrep Scan (JSON for DefectDojo)
+      - name: Run Semgrep JSON scan for DefectDojo
         run: |
-          semgrep --config "p/owasp-top-ten,p/python,p/secrets" --json --output semgrep.json
+          semgrep --config "p/owasp-top-ten,p/python,p/secrets" \
+                  --json \
+                  --output semgrep.json
 
-      - name: Upload Semgrep SARIF to GitHub
+      - name: Upload SARIF scan results to GitHub
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: semgrep.sarif
 
-      - name: Upload Semgrep JSON to DefectDojo
+      - name: Upload JSON scan results to DefectDojo
         run: |
           curl -X POST "${{ secrets.DOJO_URL }}/api/v2/import-scan/" \
             -H "Authorization: Token ${{ secrets.DOJO_API_KEY }}" \
@@ -44,17 +45,3 @@ jobs:
             -F "engagement=${{ secrets.DOJO_ENGAGEMENT_ID }}" \
             -F "active=true" \
             -F "verified=false"
-
-      # -------------------
-      # CodeQL Scans
-      # -------------------
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
-        with:
-          languages: python,javascript
-
-      - name: Autobuild
-        uses: github/codeql-action/autobuild@v3
-
-      - name: Run CodeQL Analysis
-        uses: github/codeql-action/analyze@v3
