@@ -1,8 +1,8 @@
-name: SAST Security Suite
+name: SAST Scan
 
 on:
   push:
-    branches: ["main"]
+    branches: [ "main" ]
   pull_request:
 
 permissions:
@@ -17,13 +17,18 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Install Semgrep
-        run: |
-          pip install semgrep
+        run: pip install semgrep
 
-      # ---- Semgrep scan ----
-      - name: Run Semgrep Scan
+      # -------------------
+      # Semgrep Scans
+      # -------------------
+      - name: Run Semgrep Scan (SARIF for GitHub)
         run: |
-          semgrep --config "p/owasp-top-ten,p/python,p/secrets" --sarif --output semgrep.sarif --json --output semgrep.json
+          semgrep --config "p/owasp-top-ten,p/python,p/secrets" --sarif --output semgrep.sarif
+
+      - name: Run Semgrep Scan (JSON for DefectDojo)
+        run: |
+          semgrep --config "p/owasp-top-ten,p/python,p/secrets" --json --output semgrep.json
 
       - name: Upload Semgrep SARIF to GitHub
         uses: github/codeql-action/upload-sarif@v3
@@ -40,29 +45,16 @@ jobs:
             -F "active=true" \
             -F "verified=false"
 
-      # ---- CodeQL scan ----
+      # -------------------
+      # CodeQL Scans
+      # -------------------
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
-          languages: python, javascript
-          queries: security-extended
+          languages: python,javascript
 
-      - name: Perform CodeQL Analysis
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Run CodeQL Analysis
         uses: github/codeql-action/analyze@v3
-
-      - name: Upload CodeQL results to DefectDojo
-        run: |
-          if [ -d "codeql-results" ]; then
-            for file in codeql-results/*.sarif; do
-              echo "Uploading $file to DefectDojo..."
-              curl -sS -X POST "${{ secrets.DOJO_URL }}/api/v2/import-scan/" \
-                -H "Authorization: Token ${{ secrets.DOJO_API_KEY }}" \
-                -F "scan_type=CodeQL Scan" \
-                -F "file=@${file}" \
-                -F "engagement=${{ secrets.DOJO_ENGAGEMENT_ID }}" \
-                -F "active=true" \
-                -F "verified=false" || echo "Failed to upload $file"
-            done
-          else
-            echo "No SARIF files found."
-          fi
