@@ -1,0 +1,34 @@
+name: ESLint Scan
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+
+jobs:
+  eslint-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Install ESLint
+        run: npm install eslint --save-dev
+
+      - name: Run ESLint scan
+        run: npx eslint -f json -o eslint-report.json .
+
+      - name: Upload ESLint results to DefectDojo
+        run: |
+          curl -X POST "${{ secrets.DOJO_URL }}/api/v2/import-scan/" \
+            -H "Authorization: Token ${{ secrets.DOJO_API_KEY }}" \
+            -F "scan_type=ESLint Report" \
+            -F "file=@eslint-report.json" \
+            -F "engagement=${{ secrets.DOJO_ENGAGEMENT_ID }}" \
+            -F "active=true" \
+            -F "verified=false"
