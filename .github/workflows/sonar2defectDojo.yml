@@ -47,7 +47,9 @@ jobs:
 
       - name: Wait for SonarQube to complete analysis
         if: always()
-        run: echo "⏳ Waiting 15 seconds for SonarQube analysis..." && sleep 15
+        run: |
+          echo "⏳ Waiting 15 seconds for SonarQube analysis..."
+          sleep 15
 
       - name: Collect and map SonarQube vulnerabilities
         if: always()
@@ -74,10 +76,10 @@ jobs:
                          elif .severity == "MINOR" then "Low"
                          else "Info" end),
               cwe: 0,
-              file_path: .component,
+              file_path: (.component | sub("MVP-DevSecOps-Demo_sample-app:"; "")),
               description: .message,
               unique_id_from_tool: .key,
-              line: .line,
+              line: (.line // 1),
               mitigation: .message,
               impact: .severity,
               references: .project,
@@ -88,7 +90,9 @@ jobs:
             }))
           }' > sonar_mapped.json
 
-          echo "✅ Generated sonar_mapped.json with $(cat sonar_mapped.json | jq '.findings | length') findings."
+          echo "✅ Generated sonar_mapped.json with $(jq '.findings | length' sonar_mapped.json) findings."
+          echo "📝 Preview first 3 findings:"
+          jq '.findings[:3]' sonar_mapped.json
 
       - name: Upload to DefectDojo
         if: success() || failure()
