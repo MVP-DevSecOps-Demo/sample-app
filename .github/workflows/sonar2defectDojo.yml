@@ -24,31 +24,39 @@ jobs:
         continue-on-error: true
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+          SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
         run: |
           echo "Running SonarQube scan..."
           sonar-scanner \
             -Dsonar.projectKey=MVP-DevSecOps-Demo_sample-app \
             -Dsonar.organization=mvp-devsecops-demo \
             -Dsonar.sources=. \
-            -Dsonar.host.url=${{ secrets.SONAR_HOST_URL }} \
+            -Dsonar.host.url=${{ vars.SONAR_HOST_URL }} \
             -Dsonar.login=${{ secrets.SONAR_TOKEN }}
 
-      - name: Wait for SonarQube to finalize analysis
+      - name: Wait for SonarQube to complete analysis
         if: always()
-        run: |
-          echo "Waiting for SonarQube to complete analysis..."
-          sleep 15
+        run: sleep 15
 
       - name: Collect and map SonarQube vulnerabilities
         if: always()
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+          SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
         run: |
           echo "Fetching SonarQube issues..."
-          curl -s "${{ secrets.SONAR_HOST_URL }}/api/issues/search?componentKeys=MVP-DevSecOps-Demo_sample-app&types=VULNERABILITY&ps=500" \
-            -u ${{ secrets.SONAR_TOKEN }}: > sonar_raw.json
+          if [ -z "${SONAR_HOST_URL}" ]; then
+            echo "❌ SONAR_HOST_URL is not set! Please add it under Actions Variables."
+            exit 1
+          fi
+
+          curl -s "${SONAR_HOST_URL}/api/issues/search?componentKeys=MVP-DevSecOps-Demo_sample-app&types=VULNERABILITY&ps=500" \
+            -u ${{ secrets.SONAR_TOKEN }}: > sonar_raw.json || exit 1
+
+          if [ ! -s sonar_raw.json ]; then
+            echo "❌ No data from SonarQube — skipping mapping."
+            exit 1
+          fi
 
           echo "Mapping Sonar severities to DefectDojo format..."
           cat sonar_raw.json | jq '{
@@ -73,17 +81,21 @@ jobs:
             }))
           }' > sonar_mapped.json
 
-          echo "Generated mapped file: sonar_mapped.json"
-          cat sonar_mapped.json | jq '.findings | length'
+          echo "Generated sonar_mapped.json with $(cat sonar_mapped.json | jq '.findings | length') findings."
 
       - name: Upload to DefectDojo
-        if: always()
+        if: success() || failure()  # run even if scan fails
         env:
-          DOJO_URL: ${{ secrets.DOJO_URL }}
+          DOJO_URL: ${{ vars.DOJO_URL }}
           DOJO_API_KEY: ${{ secrets.DOJO_API_KEY }}
           DOJO_ENGAGEMENT_ID: ${{ secrets.DOJO_ENGAGEMENT_ID }}
         run: |
           echo "Uploading mapped findings to DefectDojo..."
+          if [ ! -f sonar_mapped.json ]; then
+            echo "❌ sonar_mapped.json not found. Skipping upload."
+            exit 0
+          fi
+
           curl -X POST "$DOJO_URL/api/v2/import-scan/" \
             -H "Authorization: Token $DOJO_API_KEY" \
             -F "engagement=$DOJO_ENGAGEMENT_ID" \
