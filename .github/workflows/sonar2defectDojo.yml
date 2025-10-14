@@ -1,0 +1,62 @@
+name: SonarCloud Scan and DefectDojo Upload
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  sonarcloud:
+    name: SonarCloud Scan + DefectDojo
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: 17
+
+      - name: Cache SonarCloud packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.sonar/cache
+          key: ${{ runner.os }}-sonar
+          restore-keys: ${{ runner.os }}-sonar
+
+      - name: Run SonarCloud Scan
+        uses: sonarsource/sonarqube-scan-action@v2
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: "https://sonarcloud.io"
+
+      - name: SonarCloud Quality Gate
+        uses: sonarsource/sonarqube-quality-gate-action@v1
+        continue-on-error: true   # optional: don't stop build if gate fails
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: "https://sonarcloud.io"
+
+      - name: Export SonarCloud Issues and Upload to DefectDojo
+        if: always()
+        run: |
+          echo "Downloading SonarCloud issues..."
+          curl -s -u "${{ secrets.SONAR_TOKEN }}:" \
+            "https://sonarcloud.io/api/issues/search?componentKeys=${{ github.repository }}&types=VULNERABILITY&ps=500" \
+            -o sonar_issues.json
+
+          echo "Uploading SonarCloud results to DefectDojo..."
+          curl -X POST "${{ vars.DOJO_URL }}/api/v2/import-scan/" \
+            -H "Authorization: Token ${{ vars.DOJO_API_KEY }}" \
+            -F "scan_type=SonarQube Scan" \
+            -F "file=@sonar_issues.json" \
+            -F "engagement=${{ vars.DOJO_ENGAGEMENT_ID }}" \
+            -F "active=true" \
+            -F "verified=false"
