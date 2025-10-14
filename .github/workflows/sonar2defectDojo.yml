@@ -24,7 +24,7 @@ jobs:
         run: |
           echo "Installing SonarScanner CLI..."
           sudo apt-get update -y
-          sudo apt-get install -y unzip
+          sudo apt-get install -y unzip jq curl
           curl -sSLo sonar-scanner.zip https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-5.0.1.3006-linux.zip
           unzip sonar-scanner.zip
           sudo mv sonar-scanner-* /opt/sonar-scanner
@@ -47,7 +47,9 @@ jobs:
 
       - name: Wait for SonarQube to complete analysis
         if: always()
-        run: sleep 15
+        run: |
+          echo "⏳ Waiting 15 seconds for SonarQube analysis..."
+          sleep 15
 
       - name: Collect and map SonarQube vulnerabilities
         if: always()
@@ -57,7 +59,7 @@ jobs:
         run: |
           echo "📥 Fetching SonarQube issues..."
           curl -s "${SONAR_HOST_URL}/api/issues/search?componentKeys=MVP-DevSecOps-Demo_sample-app&types=VULNERABILITY&ps=500" \
-            -u ${{ secrets.SONAR_TOKEN }}: > sonar_raw.json || exit 1
+            -u $SONAR_TOKEN: > sonar_raw.json || exit 1
 
           if [ ! -s sonar_raw.json ]; then
             echo "❌ No SonarQube data found — skipping mapping."
@@ -105,7 +107,7 @@ jobs:
           curl -X POST "$DOJO_URL/api/v2/import-scan/" \
             -H "Authorization: Token $DOJO_API_KEY" \
             -F "engagement=$DOJO_ENGAGEMENT_ID" \
-            -F "scan_type=SonarQube Scan" \
+            -F "scan_type=Generic Findings Import" \
             -F "file=@sonar_mapped.json" \
             -F "active=true" \
             -F "verified=false" \
