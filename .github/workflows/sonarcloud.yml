@@ -13,20 +13,17 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # Checkout source code
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Shallow clones can cause issues with analysis
+          fetch-depth: 0  # full history helps accurate blame info
 
-      # Set up Java (SonarCloud requires JDK)
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: 17
 
-      # Cache SonarCloud packages to speed up builds
       - name: Cache SonarCloud packages
         uses: actions/cache@v4
         with:
@@ -34,14 +31,14 @@ jobs:
           key: ${{ runner.os }}-sonar
           restore-keys: ${{ runner.os }}-sonar
 
-      # Run SonarCloud Scan (NEW ACTION)
       - name: Run SonarCloud Scan
         uses: sonarsource/sonarqube-scan-action@v2
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: "https://sonarcloud.io"
 
-      # Optional: Upload report summary to GitHub Checks
       - name: SonarCloud Quality Gate
         uses: sonarsource/sonarqube-quality-gate-action@v1
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: "https://sonarcloud.io"
