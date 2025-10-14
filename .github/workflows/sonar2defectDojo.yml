@@ -45,11 +45,13 @@ jobs:
             -Dsonar.host.url=$SONAR_HOST_URL \
             -Dsonar.login=$SONAR_TOKEN
 
-      - name: Wait for SonarQube analysis
+      - name: Wait for SonarQube to complete analysis
         if: always()
-        run: sleep 15
+        run: |
+          echo "⏳ Waiting 15 seconds for SonarQube analysis..."
+          sleep 15
 
-      - name: Fetch SonarQube issues
+      - name: Collect and map SonarQube vulnerabilities
         if: always()
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
@@ -57,11 +59,11 @@ jobs:
         run: |
           echo "📥 Fetching SonarQube issues..."
           curl -s "${SONAR_HOST_URL}/api/issues/search?componentKeys=MVP-DevSecOps-Demo_sample-app&types=VULNERABILITY&ps=500" \
-            -u $SONAR_TOKEN: > sonar_raw.json || exit 0
+            -u $SONAR_TOKEN: > sonar_raw.json || exit 1
 
           if [ ! -s sonar_raw.json ]; then
             echo "❌ No SonarQube data found — skipping mapping."
-            exit 0
+            exit 1
           fi
 
           echo "🧩 Mapping Sonar severities to DefectDojo format..."
@@ -92,48 +94,22 @@ jobs:
           echo "📝 Preview first 3 findings:"
           jq '.findings[:3]' sonar_mapped.json
 
-      - name: Ensure SonarQube Test Exists in DefectDojo
-        if: success()
+      - name: Upload to DefectDojo
+        if: success() || failure()
         env:
           DOJO_URL: ${{ vars.DOJO_URL }}
           DOJO_API_KEY: ${{ secrets.DOJO_API_KEY }}
           DOJO_ENGAGEMENT_ID: ${{ secrets.DOJO_ENGAGEMENT_ID }}
         run: |
-          echo "🔎 Checking if SonarQube Scan test exists..."
-          TEST_ID=$(curl -s -H "Authorization: Token $DOJO_API_KEY" \
-            "$DOJO_URL/api/v2/tests/?engagement=$DOJO_ENGAGEMENT_ID&scan_type=SonarQube Scan" \
-            | jq -r '.results[0].id // empty')
-
-          if [ -z "$TEST_ID" ]; then
-            echo "🆕 No existing SonarQube test found. Creating a new test..."
-            TEST_ID=$(curl -s -X POST -H "Authorization: Token $DOJO_API_KEY" \
-              -F "engagement=$DOJO_ENGAGEMENT_ID" \
-              -F "scan_type=SonarQube Scan" \
-              -F "title=SonarQube Scan $(date +'%Y-%m-%d %H:%M:%S')" \
-              "$DOJO_URL/api/v2/tests/" | jq -r '.id')
-            echo "✅ Created new test with ID: $TEST_ID"
-          else
-            echo "✅ Found existing test with ID: $TEST_ID"
-          fi
-
-          echo "##vso[task.setvariable variable=DOJO_TEST_ID]$TEST_ID"
-
-      - name: Upload findings to DefectDojo
-        if: success() && steps.Ensure_SonarQube_Test_Exists_in_DefectDojo.outcome == 'success'
-        env:
-          DOJO_URL: ${{ vars.DOJO_URL }}
-          DOJO_API_KEY: ${{ secrets.DOJO_API_KEY }}
-          DOJO_TEST_ID: ${{ env.DOJO_TEST_ID }}
-        run: |
+          echo "🚀 Uploading mapped findings to DefectDojo..."
           if [ ! -f sonar_mapped.json ]; then
             echo "❌ sonar_mapped.json not found. Skipping upload."
             exit 0
           fi
 
-          echo "🚀 Uploading mapped findings to DefectDojo..."
           curl -X POST "$DOJO_URL/api/v2/import-scan/" \
             -H "Authorization: Token $DOJO_API_KEY" \
-            -F "test=$DOJO_TEST_ID" \
+            -F "engagement=$DOJO_ENGAGEMENT_ID" \
             -F "scan_type=SonarQube Scan" \
             -F "file=@sonar_mapped.json" \
             -F "active=true" \
