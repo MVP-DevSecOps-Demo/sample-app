@@ -7,41 +7,43 @@ on:
     branches: [ "main" ]
 
 jobs:
-  sonarcloud-analysis:
+  sonarcloud:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Java
+      - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
-          java-version: '17'
           distribution: 'temurin'
+          java-version: '17'
 
-      - name: SonarQube Scan
-        uses: sonarsource/sonarqube-scan-action@v3
+      - name: SonarCloud Scan
+        uses: sonarsource/sonarqube-scan-action@v2
         with:
-          projectBaseDir: .
           args: >
-            -Dsonar.organization=${{ vars.SONAR_ORG }}
-            -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY }}
-            -Dsonar.host.url=https://sonarcloud.io
-            -Dsonar.token=${{ secrets.SONAR_TOKEN }}
+            -Dproject.settings=sonar-project.properties
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: "https://sonarcloud.io"
 
-      - name: SonarCloud Quality Gate
+      - name: Check SonarCloud Quality Gate
         uses: sonarsource/sonarqube-quality-gate-action@v1
-        with:
-          scanMetadataReportFile: .scannerwork/report-task.txt
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: "https://sonarcloud.io"
 
-      - name: Download SonarCloud issues and upload to DefectDojo
+      - name: Download SonarCloud issues
         run: |
           echo "Downloading SonarCloud issues..."
           curl -s -u "${{ secrets.SONAR_TOKEN }}:" \
-            "https://sonarcloud.io/api/issues/search?componentKeys=${{ vars.SONAR_PROJECT_KEY }}&types=VULNERABILITY&ps=500" \
+            "https://sonarcloud.io/api/issues/search?componentKeys=MVP-DevSecOps-Demo_sample-app&types=VULNERABILITY&ps=500" \
             -o sonar_issues.json
 
+      - name: Upload SonarCloud results to DefectDojo
+        run: |
           echo "Uploading SonarCloud results to DefectDojo..."
           curl -X POST "${{ vars.DOJO_URL }}/api/v2/import-scan/" \
             -H "Authorization: Token ${{ vars.DOJO_API_KEY }}" \
@@ -50,6 +52,3 @@ jobs:
             -F "engagement=${{ vars.DOJO_ENGAGEMENT_ID }}" \
             -F "active=true" \
             -F "verified=false"
-
-    env:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
