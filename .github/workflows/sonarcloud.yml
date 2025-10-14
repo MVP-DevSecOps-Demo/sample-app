@@ -15,7 +15,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # full history required by SonarCloud
+          fetch-depth: 0  # full history required for analysis
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
