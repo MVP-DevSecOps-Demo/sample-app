@@ -10,6 +10,13 @@ jobs:
   sonar_and_dojo:
     runs-on: ubuntu-latest
 
+    env:
+      SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      DOJO_URL: ${{ vars.DOJO_URL }}
+      DOJO_API_KEY: ${{ secrets.DOJO_API_KEY }}
+      DOJO_ENGAGEMENT_ID: ${{ vars.DOJO_ENGAGEMENT_ID }}
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -22,43 +29,40 @@ jobs:
 
       - name: Run SonarQube Scan
         continue-on-error: true
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
         run: |
-          echo "Running SonarQube scan..."
+          echo "🔍 Running SonarQube scan..."
           sonar-scanner \
             -Dsonar.projectKey=MVP-DevSecOps-Demo_sample-app \
             -Dsonar.organization=mvp-devsecops-demo \
             -Dsonar.sources=. \
-            -Dsonar.host.url=${{ vars.SONAR_HOST_URL }} \
-            -Dsonar.login=${{ secrets.SONAR_TOKEN }}
+            -Dsonar.host.url=$SONAR_HOST_URL \
+            -Dsonar.login=$SONAR_TOKEN
 
       - name: Wait for SonarQube to complete analysis
         if: always()
-        run: sleep 15
+        run: sleep 20
 
       - name: Collect and map SonarQube vulnerabilities
         if: always()
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
         run: |
-          echo "Fetching SonarQube issues..."
-          if [ -z "${SONAR_HOST_URL}" ]; then
-            echo "❌ SONAR_HOST_URL is not set! Please add it under Actions Variables."
+          echo "📥 Fetching SonarQube issues..."
+          if [ -z "$SONAR_HOST_URL" ]; then
+            echo "❌ SONAR_HOST_URL is not set!"
             exit 1
           fi
 
-          curl -s "${SONAR_HOST_URL}/api/issues/search?componentKeys=MVP-DevSecOps-Demo_sample-app&types=VULNERABILITY&ps=500" \
-            -u ${{ secrets.SONAR_TOKEN }}: > sonar_raw.json || exit 1
+          echo "Using SonarQube host: $SONAR_HOST_URL"
+
+          curl -s -u "$SONAR_TOKEN:" \
+            "$SONAR_HOST_URL/api/issues/search?componentKeys=MVP-DevSecOps-Demo_sample-app&types=VULNERABILITY&ps=500" \
+            -o sonar_raw.json
 
           if [ ! -s sonar_raw.json ]; then
-            echo "❌ No data from SonarQube — skipping mapping."
+            echo "❌ No data returned from SonarQube. Check component key or token."
             exit 1
           fi
 
-          echo "Mapping Sonar severities to DefectDojo format..."
+          echo "🧩 Mapping Sonar severities to DefectDojo format..."
           cat sonar_raw.json | jq '{
             findings: (.issues | map({
               title: .message,
@@ -81,20 +85,18 @@ jobs:
             }))
           }' > sonar_mapped.json
 
-          echo "Generated sonar_mapped.json with $(cat sonar_mapped.json | jq '.findings | length') findings."
+          echo "✅ Generated sonar_mapped.json with $(cat sonar_mapped.json | jq '.findings | length') findings."
 
       - name: Upload to DefectDojo
-        if: success() || failure()  # run even if scan fails
-        env:
-          DOJO_URL: ${{ vars.DOJO_URL }}
-          DOJO_API_KEY: ${{ secrets.DOJO_API_KEY }}
-          DOJO_ENGAGEMENT_ID: ${{ secrets.DOJO_ENGAGEMENT_ID }}
+        if: success() || failure()
         run: |
-          echo "Uploading mapped findings to DefectDojo..."
+          echo "⬆️ Uploading mapped findings to DefectDojo..."
           if [ ! -f sonar_mapped.json ]; then
             echo "❌ sonar_mapped.json not found. Skipping upload."
             exit 0
           fi
+
+          echo "Using DefectDojo URL: $DOJO_URL"
 
           curl -X POST "$DOJO_URL/api/v2/import-scan/" \
             -H "Authorization: Token $DOJO_API_KEY" \
@@ -109,4 +111,4 @@ jobs:
 
       - name: Finish
         if: always()
-        run: echo "✅ Workflow complete — SonarQube → DefectDojo pipeline done."
+        run: echo "🏁 Workflow complete — SonarQube → DefectDojo pipeline done."
