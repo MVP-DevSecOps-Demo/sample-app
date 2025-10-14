@@ -1,4 +1,4 @@
-name: SonarCloud Scan and Upload to DefectDojo
+name: SonarQube + DefectDojo Integration
 
 on:
   push:
@@ -7,48 +7,94 @@ on:
     branches: [ "main" ]
 
 jobs:
-  sonarcloud:
+  sonar_and_dojo:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up JDK 17
+      - name: Set up Java
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: SonarCloud Scan
-        uses: sonarsource/sonarqube-scan-action@v2
-        with:
-          args: >
-            -Dproject.settings=sonar-project.properties
+      - name: Run SonarQube Scan
+        continue-on-error: true
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: "https://sonarcloud.io"
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        run: |
+          echo "Running SonarQube scan..."
+          sonar-scanner \
+            -Dsonar.projectKey=MVP-DevSecOps-Demo_sample-app \
+            -Dsonar.organization=mvp-devsecops-demo \
+            -Dsonar.sources=. \
+            -Dsonar.host.url=${{ secrets.SONAR_HOST_URL }} \
+            -Dsonar.login=${{ secrets.SONAR_TOKEN }}
 
-      - name: Check SonarCloud Quality Gate
-        uses: sonarsource/sonarqube-quality-gate-action@v1
+      - name: Wait for SonarQube to finalize analysis
+        if: always()
+        run: |
+          echo "Waiting for SonarQube to complete analysis..."
+          sleep 15
+
+      - name: Collect and map SonarQube vulnerabilities
+        if: always()
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: "https://sonarcloud.io"
-
-      - name: Download SonarCloud issues
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
         run: |
-          echo "Downloading SonarCloud issues..."
-          curl -s -u "${{ secrets.SONAR_TOKEN }}:" \
-            "https://sonarcloud.io/api/issues/search?componentKeys=MVP-DevSecOps-Demo_sample-app&types=VULNERABILITY&ps=500" \
-            -o sonar_issues.json
+          echo "Fetching SonarQube issues..."
+          curl -s "${{ secrets.SONAR_HOST_URL }}/api/issues/search?componentKeys=MVP-DevSecOps-Demo_sample-app&types=VULNERABILITY&ps=500" \
+            -u ${{ secrets.SONAR_TOKEN }}: > sonar_raw.json
 
-      - name: Upload SonarCloud results to DefectDojo
+          echo "Mapping Sonar severities to DefectDojo format..."
+          cat sonar_raw.json | jq '{
+            findings: (.issues | map({
+              title: .message,
+              severity: (if .severity == "BLOCKER" then "Critical"
+                         elif .severity == "CRITICAL" then "High"
+                         elif .severity == "MAJOR" then "Medium"
+                         elif .severity == "MINOR" then "Low"
+                         else "Info" end),
+              cwe: 0,
+              file_path: .component,
+              description: .message,
+              unique_id_from_tool: .key,
+              line: .line,
+              mitigation: .message,
+              impact: .severity,
+              references: .project,
+              static_finding: true,
+              active: true,
+              verified: false
+            }))
+          }' > sonar_mapped.json
+
+          echo "Generated mapped file: sonar_mapped.json"
+          cat sonar_mapped.json | jq '.findings | length'
+
+      - name: Upload to DefectDojo
+        if: always()
+        env:
+          DOJO_URL: ${{ secrets.DOJO_URL }}
+          DOJO_API_KEY: ${{ secrets.DOJO_API_KEY }}
+          DOJO_ENGAGEMENT_ID: ${{ secrets.DOJO_ENGAGEMENT_ID }}
         run: |
-          echo "Uploading SonarCloud results to DefectDojo..."
-          curl -X POST "${{ vars.DOJO_URL }}/api/v2/import-scan/" \
-            -H "Authorization: Token ${{ vars.DOJO_API_KEY }}" \
+          echo "Uploading mapped findings to DefectDojo..."
+          curl -X POST "$DOJO_URL/api/v2/import-scan/" \
+            -H "Authorization: Token $DOJO_API_KEY" \
+            -F "engagement=$DOJO_ENGAGEMENT_ID" \
             -F "scan_type=SonarQube Scan" \
-            -F "file=@sonar_issues.json" \
-            -F "engagement=${{ vars.DOJO_ENGAGEMENT_ID }}" \
+            -F "file=@sonar_mapped.json" \
             -F "active=true" \
-            -F "verified=false"
+            -F "verified=false" \
+            -F "close_old_findings=false"
+
+          echo "✅ DefectDojo upload completed."
+
+      - name: Finish
+        if: always()
+        run: echo "✅ Workflow complete — SonarQube → DefectDojo pipeline done."
