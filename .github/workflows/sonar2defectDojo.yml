@@ -35,8 +35,12 @@ jobs:
       - name: 🔍 Run SonarQube scan
         run: |
           echo "🔍 Running SonarQube scan..."
-          npm install
-          npx sonar-scanner \
+          # Run sonar-scanner (assuming you configured it in SonarCloud)
+          curl -sSLo sonar-scanner.zip https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-5.0.1.3006-linux.zip
+          unzip sonar-scanner.zip -d $HOME/
+          export PATH="$HOME/sonar-scanner-5.0.1.3006-linux/bin:$PATH"
+
+          sonar-scanner \
             -Dsonar.projectKey=$SONAR_PROJECT_KEY \
             -Dsonar.organization=mvp-devsecops-demo \
             -Dsonar.sources=. \
@@ -62,4 +66,39 @@ jobs:
               title: .message,
               severity: (if .severity == "BLOCKER" then "Critical"
                          elif .severity == "CRITICAL" then "High"
-                         elif .severity == "MA
+                         elif .severity == "MAJOR" then "Medium"
+                         elif .severity == "MINOR" then "Low"
+                         else "Info" end),
+              file_path: (.component | split(":") | last),
+              description: .message,
+              unique_id_from_tool: .key,
+              line: .line,
+              mitigation: .message,
+              impact: .severity,
+              references: .project,
+              static_finding: true,
+              active: true,
+              verified: false,
+              date: .creationDate
+            }))
+          }' > sonar_mapped.json
+
+          echo "✅ Generated sonar_mapped.json with $(jq '.findings | length' sonar_mapped.json) findings."
+          jq '.findings[:3]' sonar_mapped.json
+
+      - name: 🚀 Upload mapped findings to DefectDojo
+        run: |
+          echo "🚀 Uploading SonarQube findings to DefectDojo Engagement ID $DOJO_ENGAGEMENT_ID"
+          response=$(curl -s -X POST "$DOJO_URL/api/v2/import-scan/" \
+            -H "Authorization: Token $DOJO_API_KEY" \
+            -F "engagement=$DOJO_ENGAGEMENT_ID" \
+            -F "scan_type=Generic Findings Import" \
+            -F "file=@sonar_mapped.json" \
+            -F "active=true" \
+            -F "verified=false" \
+            -F "minimum_severity=Info" \
+            -F "close_old_findings=false" \
+            -F "push_to_jira=false")
+
+          echo "$response" | jq .
+          echo "✅ Upload completed."
