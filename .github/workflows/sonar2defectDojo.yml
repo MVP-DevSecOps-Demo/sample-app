@@ -94,6 +94,7 @@ jobs:
             -F "engagement=$DOJO_ENGAGEMENT_ID" \
             -F "scan_type=Generic Findings Import" \
             -F "file=@sonar_mapped.json" \
+            -F "test_title=SonarQube Scan (Generic)" \
             -F "active=true" \
             -F "verified=false" \
             -F "minimum_severity=Info" \
