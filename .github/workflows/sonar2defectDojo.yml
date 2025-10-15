@@ -1,9 +1,9 @@
-name: SonarQube → DefectDojo Integration
+name: SonarQube → DefectDojo Sync
 
 on:
   workflow_dispatch:
   push:
-    branches: ["main"]
+    branches: [ "main" ]
 
 jobs:
   sonar-to-defectdojo:
@@ -11,88 +11,90 @@ jobs:
 
     env:
       SONAR_HOST_URL: https://sonarcloud.io
-      SONAR_PROJECT_KEY: MVP-DevSecOps-Demo_sample-app
-      DOJO_URL: ${{ vars.DOJO_URL }}
-      DOJO_API_KEY: ${{ secrets.DOJO_API_KEY }}
-      DOJO_ENGAGEMENT_ID: ${{ vars.DOJO_ENGAGEMENT_ID }}
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      SONAR_PROJECT_KEY: MVP-DevSecOps-Demo_sample-app
+      DOJO_URL: ${{ secrets.DOJO_URL }}
+      DOJO_API_KEY: ${{ secrets.DOJO_API_KEY }}
+      DOJO_ENGAGEMENT_ID: 3
 
     steps:
-      - name: 🧩 Checkout repository
+      - name: 🧰 Checkout repository
         uses: actions/checkout@v4
 
-      - name: 🛠️ Install dependencies
+      - name: ⚙️ Install dependencies
         run: |
-          sudo apt-get update -y
-          sudo apt-get install -y jq curl
+          sudo apt-get update
+          sudo apt-get install -y curl jq npm
+          npm install -g sonar-scanner
 
-      - name: 📋 List DefectDojo test types (debug)
+      - name: 📋 Check & Create SonarQube Test Type in DefectDojo
+        id: check_test_type
         run: |
-          echo "📋 Listing available DefectDojo test types..."
-          curl -s -X GET "$DOJO_URL/api/v2/test_types/" \
-            -H "Authorization: Token $DOJO_API_KEY" | jq '.results[].name'
+          echo "📋 Checking if 'SonarQube Scan' test type exists..."
+          response=$(curl -s -X GET "$DOJO_URL/api/v2/test_types/" \
+            -H "Authorization: Token $DOJO_API_KEY")
+
+          if echo "$response" | jq -e '.results[].name' | grep -q "SonarQube Scan"; then
+            echo "✅ 'SonarQube Scan' already exists."
+          else
+            echo "🆕 Creating 'SonarQube Scan' test type..."
+            curl -s -X POST "$DOJO_URL/api/v2/test_types/" \
+              -H "Authorization: Token $DOJO_API_KEY" \
+              -H "Content-Type: application/json" \
+              -d '{"name": "SonarQube Scan", "description": "SonarQube static analysis results"}' \
+              | jq .
+          fi
 
       - name: 🔍 Run SonarQube scan
         run: |
           echo "🔍 Running SonarQube scan..."
-          # Run sonar-scanner (assuming you configured it in SonarCloud)
-          curl -sSLo sonar-scanner.zip https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-5.0.1.3006-linux.zip
-          unzip sonar-scanner.zip -d $HOME/
-          export PATH="$HOME/sonar-scanner-5.0.1.3006-linux/bin:$PATH"
-
           sonar-scanner \
             -Dsonar.projectKey=$SONAR_PROJECT_KEY \
-            -Dsonar.organization=mvp-devsecops-demo \
             -Dsonar.sources=. \
             -Dsonar.host.url=$SONAR_HOST_URL \
-            -Dsonar.login=$SONAR_TOKEN
+            -Dsonar.login=$SONAR_TOKEN || true
 
-      - name: 📥 Fetch SonarQube issues
+      - name: 📥 Fetch and Map SonarQube Findings
         run: |
           echo "📥 Fetching issues from SonarCloud project: $SONAR_PROJECT_KEY"
-          curl -s "${SONAR_HOST_URL}/api/issues/search?componentKeys=$SONAR_PROJECT_KEY&types=VULNERABILITY&ps=500" \
-            -u $SONAR_TOKEN: > sonar_raw.json || exit 1
 
-          if [ ! -s sonar_raw.json ]; then
-            echo "❌ No issues found from SonarQube — skipping upload."
-            exit 1
-          fi
+          issues=$(curl -s "https://sonarcloud.io/api/issues/search?componentKeys=$SONAR_PROJECT_KEY&types=VULNERABILITY,BUG,SECURITY_HOTSPOT&ps=500")
 
-      - name: 🧩 Map SonarQube findings to DefectDojo format
-        run: |
           echo "🧩 Mapping SonarQube findings to DefectDojo format..."
-          cat sonar_raw.json | jq '{
-            findings: (.issues | map({
+          echo "$issues" | jq -r '
+            .issues | map({
               title: .message,
               severity: (if .severity == "BLOCKER" then "Critical"
-                         elif .severity == "CRITICAL" then "High"
-                         elif .severity == "MAJOR" then "Medium"
-                         elif .severity == "MINOR" then "Low"
-                         else "Info" end),
-              file_path: (.component | split(":") | last),
+                         elif .severity == "CRITICAL" then "Critical"
+                         elif .severity == "MAJOR" then "High"
+                         elif .severity == "MINOR" then "Medium"
+                         else "Low" end),
+              cwe: 0,
+              file_path: .component,
               description: .message,
               unique_id_from_tool: .key,
-              line: .line,
+              line: (.line // 0),
               mitigation: .message,
               impact: .severity,
               references: .project,
               static_finding: true,
               active: true,
               verified: false,
-              date: .creationDate
-            }))
-          }' > sonar_mapped.json
+              date: .creationDate,
+              test_type: "SonarQube Scan"
+            })' > sonar_mapped.json
 
-          echo "✅ Generated sonar_mapped.json with $(jq '.findings | length' sonar_mapped.json) findings."
-          jq '.findings[:3]' sonar_mapped.json
+          echo "✅ Generated sonar_mapped.json with $(jq length sonar_mapped.json) findings."
+          echo "📝 Preview first 3 findings:"
+          jq '.[0:3]' sonar_mapped.json
 
-      - name: 🚀 Upload mapped findings to DefectDojo
+      - name: 🚀 Upload SonarQube Findings to DefectDojo
         run: |
           echo "🚀 Uploading SonarQube findings to DefectDojo Engagement ID $DOJO_ENGAGEMENT_ID"
           response=$(curl -s -X POST "$DOJO_URL/api/v2/import-scan/" \
             -H "Authorization: Token $DOJO_API_KEY" \
             -F "engagement=$DOJO_ENGAGEMENT_ID" \
-            -F "scan_type=Generic Findings Import" \
+            -F "scan_type=SonarQube Scan" \
             -F "file=@sonar_mapped.json" \
             -F "active=true" \
             -F "verified=false" \
@@ -100,5 +102,6 @@ jobs:
             -F "close_old_findings=false" \
             -F "push_to_jira=false")
 
-          echo "$response" | jq .
           echo "✅ Upload completed."
+          echo "$response" | jq .
+
