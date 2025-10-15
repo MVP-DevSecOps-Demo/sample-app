@@ -1,51 +1,85 @@
-- name: 📥 Fetch SonarQube Issues and Map for DefectDojo
-  run: |
-    echo "📥 Fetching SonarQube issues from SonarCloud..."
-    curl -s "${SONAR_HOST_URL}/api/issues/search?componentKeys=MVP-DevSecOps-Demo_sample-app&types=VULNERABILITY&ps=500" \
-      -u $SONAR_TOKEN: > sonar_raw.json || exit 1
+name: SonarQube → DefectDojo Sync
 
-    if [ ! -s sonar_raw.json ]; then
-      echo "❌ No SonarQube data found — skipping mapping."
-      exit 1
-    fi
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
 
-    echo "🧩 Mapping Sonar severities and fields to DefectDojo format..."
-    cat sonar_raw.json | jq '{
-      findings: (.issues | map({
-        title: .message,
-        severity: (if .severity == "BLOCKER" then "Critical"
-                   elif .severity == "CRITICAL" then "High"
-                   elif .severity == "MAJOR" then "Medium"
-                   elif .severity == "MINOR" then "Low"
-                   else "Info" end),
-        cwe: 0,
-        file_path: (.component | split(":")[1]),
-        description: .message,
-        unique_id_from_tool: .key,
-        line: .line,
-        mitigation: .message,
-        static_finding: true,
-        active: true,
-        verified: false,
-        date: (.creationDate | sub("\\+0000$"; "Z")),
-        test_type: "SonarQube Scan"
-      }))
-    }' > sonar_mapped.json
+jobs:
+  sonar-to-dojo:
+    runs-on: ubuntu-latest
 
-    echo "✅ Generated sonar_mapped.json with $(cat sonar_mapped.json | jq '.findings | length') findings."
-    echo "📝 Previewing first few findings:"
-    cat sonar_mapped.json | jq '.findings[:3]'
+    env:
+      SONAR_HOST_URL: https://sonarcloud.io
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      DOJO_URL: ${{ vars.DOJO_URL }}
+      DOJO_API_KEY: ${{ secrets.DOJO_API_KEY }}
+      DOJO_ENGAGEMENT_ID: ${{ vars.DOJO_ENGAGEMENT_ID }}
+      SONAR_PROJECT_KEY: MVP-DevSecOps-Demo_sample-app
 
-- name: 🚀 Upload mapped findings to DefectDojo
-  run: |
-    echo "🚀 Uploading SonarQube findings to DefectDojo..."
-    curl -s -X POST "$DOJO_URL/api/v2/import-scan/" \
-      -H "Authorization: Token $DOJO_API_KEY" \
-      -F "engagement=$DOJO_ENGAGEMENT_ID" \
-      -F "scan_type=Generic Findings Import" \
-      -F "file=@sonar_mapped.json" \
-      -F "active=true" \
-      -F "verified=false" \
-      -F "minimum_severity=Info" \
-      -F "close_old_findings=false" \
-      -F "push_to_jira=false" | jq
+    steps:
+      - name: 🛠️ Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 📡 Fetch and map SonarQube issues
+        run: |
+          echo "📥 Fetching issues from SonarCloud project: $SONAR_PROJECT_KEY"
+          curl -s "${SONAR_HOST_URL}/api/issues/search?componentKeys=${SONAR_PROJECT_KEY}&types=VULNERABILITY&ps=500" \
+            -u $SONAR_TOKEN: > sonar_raw.json || exit 1
+
+          if [ ! -s sonar_raw.json ]; then
+            echo "❌ No SonarQube data found — skipping upload."
+            exit 1
+          fi
+
+          echo "🧩 Mapping SonarQube findings to DefectDojo format..."
+          cat sonar_raw.json | jq '{
+            findings: (.issues | map({
+              title: .message,
+              severity: (if .severity == "BLOCKER" then "Critical"
+                         elif .severity == "CRITICAL" then "High"
+                         elif .severity == "MAJOR" then "Medium"
+                         elif .severity == "MINOR" then "Low"
+                         else "Info" end),
+              cwe: 0,
+              file_path: (.component | split(":")[1]),
+              description: .message,
+              unique_id_from_tool: .key,
+              line: .line,
+              mitigation: .message,
+              impact: .severity,
+              references: .project,
+              static_finding: true,
+              active: true,
+              verified: false,
+              date: (.creationDate | sub("\\+0000$"; "Z")),
+              test_type: "SonarQube Scan"
+            }))
+          }' > sonar_mapped.json
+
+          echo "✅ Generated sonar_mapped.json with $(cat sonar_mapped.json | jq '.findings | length') findings."
+          echo "📝 Preview first 3 findings:"
+          cat sonar_mapped.json | jq '.findings[:3]'
+
+      - name: 🚀 Upload findings to DefectDojo
+        run: |
+          echo "🚀 Uploading SonarQube findings to DefectDojo Engagement ID $DOJO_ENGAGEMENT_ID"
+          response=$(curl -s -X POST "$DOJO_URL/api/v2/import-scan/" \
+            -H "Authorization: Token $DOJO_API_KEY" \
+            -F "engagement=$DOJO_ENGAGEMENT_ID" \
+            -F "scan_type=Generic Findings Import" \
+            -F "file=@sonar_mapped.json" \
+            -F "active=true" \
+            -F "verified=false" \
+            -F "minimum_severity=Info" \
+            -F "close_old_findings=false" \
+            -F "push_to_jira=false")
+
+          echo "$response" | jq .
+          echo "✅ Upload completed."
+
+      - name: 🔍 Verify uploaded findings (optional)
+        run: |
+          echo "🔍 Checking DefectDojo engagement findings count..."
+          curl -s "$DOJO_URL/api/v2/findings/?engagement=$DOJO_ENGAGEMENT_ID" \
+            -H "Authorization: Token $DOJO_API_KEY" | jq '{total_findings: .count, sample: .results[:3]}'
