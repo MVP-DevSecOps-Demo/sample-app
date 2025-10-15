@@ -1,10 +1,13 @@
-name: 🔍 SonarQube to DefectDojo Upload
+name: SonarQube SAST with DefectDojo Upload
 
 on:
-  workflow_dispatch:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
 
 jobs:
-  sonar-to-defectdojo:
+  sonarqube-defectdojo:
     runs-on: ubuntu-latest
 
     env:
@@ -16,19 +19,41 @@ jobs:
       DOJO_ENGAGEMENT_ID: 3
 
     steps:
-      - name: 🛠️ Checkout code
+      - name: 📦 Checkout repository
         uses: actions/checkout@v4
 
-      - name: ⚡ Set up Node.js
+      - name: 🧠 Verify DefectDojo connectivity
+        run: |
+          echo "🔗 Checking connection to $DOJO_URL..."
+          if ! curl -fs --connect-timeout 10 "$DOJO_URL/api/v2/system_settings/" \
+            -H "Authorization: Token $DOJO_API_KEY" >/dev/null; then
+            echo "❌ Cannot reach DefectDojo at $DOJO_URL — please check ngrok or network access."
+            exit 1
+          fi
+          echo "✅ DefectDojo reachable."
+
+      - name: ⚙️ Setup Node.js (required by scanner)
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: 20
 
-      - name: 🧩 Install dependencies
+      - name: 🧰 Install dependencies (if applicable)
         run: |
-          sudo apt-get update
-          sudo apt-get install -y curl jq
-          npm install -g sonar-scanner
+          if [ -f "package.json" ]; then
+            npm install
+          else
+            echo "⚠️ No package.json found — skipping npm install"
+          fi
+
+      - name: 🔍 Run SonarQube Scan
+        run: |
+          echo "🚀 Starting SonarQube analysis..."
+          npx sonar-scanner \
+            -Dsonar.organization=mvpdemo \
+            -Dsonar.projectKey=$SONAR_PROJECT_KEY \
+            -Dsonar.host.url=$SONAR_HOST_URL \
+            -Dsonar.login=$SONAR_TOKEN \
+            -Dsonar.sources=.
 
       - name: 📋 Check if 'SonarQube Scan' test type exists
         run: |
@@ -47,68 +72,18 @@ jobs:
               | jq .
           fi
 
-      - name: 🔍 Run SonarQube scan
+      - name: 📤 Upload SonarQube results to DefectDojo
         run: |
-          echo "🔍 Running SonarQube scan..."
-          sonar-scanner \
-            -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
-            -Dsonar.organization=mvpdemo \
-            -Dsonar.sources=. \
-            -Dsonar.host.url=${SONAR_HOST_URL} \
-            -Dsonar.login=${SONAR_TOKEN}
-
-      - name: 📥 Fetch SonarQube issues
-        run: |
-          echo "📥 Fetching issues from SonarCloud project: $SONAR_PROJECT_KEY"
-          curl -s -u "${SONAR_TOKEN}:" \
-            "$SONAR_HOST_URL/api/issues/search?componentKeys=$SONAR_PROJECT_KEY" \
-            | jq '.' > sonar_issues.json
-
-      - name: 🧩 Map SonarQube findings to DefectDojo format
-        run: |
-          echo "🧩 Mapping SonarQube findings to DefectDojo format..."
-          jq -r '
-            .issues[] | {
-              title: .message,
-              severity: (if .severity == "BLOCKER" or .severity == "CRITICAL" then "Critical"
-                         elif .severity == "MAJOR" then "High"
-                         elif .severity == "MINOR" then "Medium"
-                         elif .severity == "INFO" then "Low"
-                         else "Info" end),
-              cwe: 0,
-              file_path: .component | split(":") | .[1],
-              description: .message,
-              unique_id_from_tool: .key,
-              line: .line,
-              mitigation: .message,
-              impact: .severity,
-              references: .project,
-              static_finding: true,
-              active: true,
-              verified: false,
-              date: .creationDate,
-              test_type: "SonarQube Scan"
-            }
-          ' sonar_issues.json > sonar_mapped.json
-
-          count=$(jq length sonar_mapped.json)
-          echo "✅ Generated sonar_mapped.json with $count findings."
-          echo "📝 Preview first 3 findings:"
-          jq '.[0:3]' sonar_mapped.json
-
-      - name: 🚀 Upload SonarQube findings to DefectDojo
-        run: |
-          echo "🚀 Uploading SonarQube findings to DefectDojo Engagement ID $DOJO_ENGAGEMENT_ID"
-          response=$(curl -s -X POST "$DOJO_URL/api/v2/import-scan/" \
-            -H "Authorization: Token $DOJO_API_KEY" \
-            -F "engagement=$DOJO_ENGAGEMENT_ID" \
-            -F "scan_type=SonarQube Scan" \
-            -F "file=@sonar_mapped.json" \
-            -F "active=true" \
-            -F "verified=false" \
-            -F "minimum_severity=Info" \
-            -F "close_old_findings=false" \
-            -F "push_to_jira=false")
-
-          echo "$response" | jq .
-          echo "✅ Upload completed."
+          echo "📤 Uploading SonarQube results to DefectDojo..."
+          # Replace this with actual path to SonarQube JSON or generic import file if you have it
+          # Example assumes you generate or export report to sonar-report.json
+          if [ -f "sonar-report.json" ]; then
+            curl -s -X POST "$DOJO_URL/api/v2/import-scan/" \
+              -H "Authorization: Token $DOJO_API_KEY" \
+              -F "engagement=$DOJO_ENGAGEMENT_ID" \
+              -F "scan_type=SonarQube Scan" \
+              -F "file=@sonar-report.json" \
+              | jq .
+          else
+            echo "⚠️ sonar-report.json not found — skipping upload."
+          fi
